@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WorkItemsTracker.Api/WorkItemsTracker.Api.csproj" />
+    <Project Path="src/WorkItemsTracker.Core/WorkItemsTracker.Core.csproj" />
+    <Project Path="src/WorkItemsTracker.Infrastructure/WorkItemsTracker.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WorkItemsTracker.Tests/WorkItemsTracker.Tests.csproj" />
+  </Folder>
+</Solution>
