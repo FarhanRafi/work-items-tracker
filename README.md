@@ -96,13 +96,36 @@ npm test
 
 ---
 
-## 5. Database Migrations
+## 5. Database Configuration & Migrations
 
-To add or update EF Core migrations:
+### Local Database Configuration
+In development, the application connects to Microsoft SQL Server LocalDB (`(localdb)\mssqllocaldb`). The connection string is configured in [`appsettings.Development.json`](file:///e:/Projects/work-items-tracker/src/WorkItemsTracker.Api/appsettings.Development.json). In production, provide the connection string via environment variable `ConnectionStrings__DefaultConnection` or secret store.
+
+### Creating and Applying Migrations (Local Development)
+To add a new migration or apply migrations to your local database:
 
 ```powershell
+# Add a new migration
 dotnet ef migrations add <MigrationName> --project src/WorkItemsTracker.Infrastructure --startup-project src/WorkItemsTracker.Api
+
+# Apply migrations using EF Core CLI
 dotnet ef database update --project src/WorkItemsTracker.Infrastructure --startup-project src/WorkItemsTracker.Api
+
+# Alternatively, apply migrations via the API's explicit CLI flag:
+dotnet run --project src/WorkItemsTracker.Api -- --migrate
 ```
 
-The application is configured to automatically apply pending migrations on startup during development.
+### Production Migration Strategy
+To protect against multi-instance race conditions and unexpected schema mutations in production:
+- **Do not** apply migrations automatically on standard application startup (`app.Run()`).
+- Use a dedicated, controlled deployment step (such as a Kubernetes `Job` or release pipeline task executing `dotnet WorkItemsTracker.Api.dll --migrate`, or generating idempotent SQL migration scripts via `dotnet ef migrations script --idempotent`).
+
+---
+
+## 6. Health Check Probes
+
+The API exposes isolated health endpoints:
+- **Liveness probe (`/health/live`)**: Confirms the web process is running. Used by container orchestrators to detect process lockup.
+- **Readiness probe (`/health/ready`)**: Performs a query against SQL Server via `AppDbContext`. Used by orchestrators to route traffic only when the database is available.
+- **General probe (`/health`)**: Returns structured JSON with status and timing without leaking connection strings, credentials, or stack traces.
+
