@@ -1,11 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using WorkItemsTracker.Core.DTOs;
-using WorkItemsTracker.Core.Entities;
-using WorkItemsTracker.Infrastructure.Data;
-using WorkItemsTracker.Infrastructure.Security;
+using WorkItemsTracker.Core.Services;
 
 namespace WorkItemsTracker.Api.Controllers;
 
@@ -13,20 +10,12 @@ namespace WorkItemsTracker.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
-    private readonly IPasswordHasherService _passwordHasher;
-    private readonly IJwtTokenService _jwtTokenService;
+    private readonly IAuthService _authService;
     private readonly ILogger<AuthController> _logger;
 
-    public AuthController(
-        AppDbContext dbContext,
-        IPasswordHasherService passwordHasher,
-        IJwtTokenService jwtTokenService,
-        ILogger<AuthController> logger)
+    public AuthController(IAuthService authService, ILogger<AuthController> logger)
     {
-        _dbContext = dbContext;
-        _passwordHasher = passwordHasher;
-        _jwtTokenService = jwtTokenService;
+        _authService = authService;
         _logger = logger;
     }
 
@@ -41,40 +30,14 @@ public class AuthController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var result = await _authService.RegisterAsync(request);
 
-        var existingUser = await _dbContext.Users
-            .AnyAsync(u => u.Email == normalizedEmail);
-
-        if (existingUser)
+        if (!result.IsSuccess)
         {
-            return Conflict(new { message = "An account with this email address already exists." });
+            return Conflict(new { message = result.ErrorMessage });
         }
 
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            Email = normalizedEmail,
-            FullName = request.FullName.Trim(),
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
-
-        _dbContext.Users.Add(user);
-        await _dbContext.SaveChangesAsync();
-
-        var (token, expiresAt) = _jwtTokenService.GenerateToken(user);
-
-        var response = new AuthResponseDto(
-            Token: token,
-            UserId: user.Id,
-            Email: user.Email,
-            FullName: user.FullName,
-            ExpiresAtUtc: expiresAt
-        );
-
-        return StatusCode(StatusCodes.Status201Created, response);
+        return StatusCode(StatusCodes.Status201Created, result.Response);
     }
 
     [HttpPost("login")]
@@ -88,33 +51,19 @@ public class AuthController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var result = await _authService.LoginAsync(request);
 
-        var user = await _dbContext.Users
-            .SingleOrDefaultAsync(u => u.Email == normalizedEmail);
-
-        if (user is null || !_passwordHasher.VerifyPassword(user, request.Password, user.PasswordHash))
+        if (!result.IsSuccess)
         {
-            // Intentionally vague message to avoid username enumeration
-            return Unauthorized(new { message = "Invalid email or password." });
+            return Unauthorized(new { message = result.ErrorMessage });
         }
 
-        var (token, expiresAt) = _jwtTokenService.GenerateToken(user);
-
-        var response = new AuthResponseDto(
-            Token: token,
-            UserId: user.Id,
-            Email: user.Email,
-            FullName: user.FullName,
-            ExpiresAtUtc: expiresAt
-        );
-
-        return Ok(response);
+        return Ok(result.Response);
     }
 
     [HttpGet("me")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCurrentUser()
@@ -126,18 +75,12 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        var user = await _dbContext.Users.FindAsync(userId);
-        if (user is null)
+        var profile = await _authService.GetUserProfileAsync(userId);
+        if (profile is null)
         {
             return NotFound();
         }
 
-        return Ok(new
-        {
-            user.Id,
-            user.Email,
-            user.FullName,
-            user.CreatedAtUtc
-        });
+        return Ok(profile);
     }
 }

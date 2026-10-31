@@ -198,4 +198,50 @@ public class WorkItemsIntegrationTests : IAsyncLifetime
         var verified = await verifyResponse.Content.ReadFromJsonAsync<WorkItemResponseDto>();
         verified!.Title.Should().Be("User A Confidential Item");
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Create_WhitespaceOrEmptyTitle_Returns400BadRequest(string invalidTitle)
+    {
+        // Arrange
+        var (userClient, _) = await CreateAuthenticatedUserAsync("validator", "Validator");
+        var createDto = new CreateWorkItemRequestDto(Title: invalidTitle, Description: "Some description");
+
+        // Act
+        var response = await userClient.PostAsJsonAsync("/api/workitems", createDto);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Create_ClientCannotSetOrTamperWithOwnerId_ServerAlwaysEnforcesAuthenticatedOwner()
+    {
+        // Arrange
+        var (userClient, auth) = await CreateAuthenticatedUserAsync("owner_enforced", "Owner Enforced");
+        var spoofedOwnerId = Guid.NewGuid();
+
+        // Send raw JSON with an injected OwnerId field
+        var rawJsonPayload = new
+        {
+            Title = "Valid Work Item",
+            Description = "Checking OwnerId immutability",
+            Status = WorkItemStatus.Todo,
+            Priority = WorkItemPriority.Medium,
+            OwnerId = spoofedOwnerId
+        };
+
+        // Act
+        var response = await userClient.PostAsJsonAsync("/api/workitems", rawJsonPayload);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await response.Content.ReadFromJsonAsync<WorkItemResponseDto>();
+        created.Should().NotBeNull();
+
+        // Server must enforce authenticated user's ID, completely ignoring client-supplied OwnerId
+        created!.OwnerId.Should().Be(auth.UserId);
+        created.OwnerId.Should().NotBe(spoofedOwnerId);
+    }
 }

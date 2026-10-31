@@ -191,4 +191,33 @@ public class AuthIntegrationTests : IAsyncLifetime
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    [Fact]
+    public async Task Register_WhenDuplicateEmailAttempted_Returns409WithoutLeakingDatabaseDetails()
+    {
+        // Arrange
+        var email = $"conflict_{Guid.NewGuid()}@example.com";
+        var firstUser = new RegisterRequestDto(email, "Password123!", "First User");
+        var firstResponse = await _client.PostAsJsonAsync("/api/auth/register", firstUser);
+        firstResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var duplicateUser = new RegisterRequestDto(email, "Password123!", "Second User");
+
+        // Act
+        var conflictResponse = await _client.PostAsJsonAsync("/api/auth/register", duplicateUser);
+
+        // Assert
+        conflictResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var rawContent = await conflictResponse.Content.ReadAsStringAsync();
+
+        // Must return safe client message
+        rawContent.Should().Contain("An account with this email address already exists.");
+
+        // Must never leak database or server internals
+        rawContent.Should().NotContain("SqlException");
+        rawContent.Should().NotContain("IX_Users_Email");
+        rawContent.Should().NotContain("dbo.Users");
+        rawContent.Should().NotContain("StackTrace");
+        rawContent.Should().NotContain("DbUpdateException");
+    }
 }

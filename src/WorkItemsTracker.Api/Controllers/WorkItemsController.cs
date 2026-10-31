@@ -1,11 +1,9 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using WorkItemsTracker.Core.DTOs;
-using WorkItemsTracker.Core.Entities;
 using WorkItemsTracker.Core.Enums;
-using WorkItemsTracker.Infrastructure.Data;
+using WorkItemsTracker.Core.Services;
 
 namespace WorkItemsTracker.Api.Controllers;
 
@@ -14,12 +12,12 @@ namespace WorkItemsTracker.Api.Controllers;
 [Authorize]
 public class WorkItemsController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
+    private readonly IWorkItemService _workItemService;
     private readonly ILogger<WorkItemsController> _logger;
 
-    public WorkItemsController(AppDbContext dbContext, ILogger<WorkItemsController> logger)
+    public WorkItemsController(IWorkItemService workItemService, ILogger<WorkItemsController> logger)
     {
-        _dbContext = dbContext;
+        _workItemService = workItemService;
         _logger = logger;
     }
 
@@ -40,33 +38,7 @@ public class WorkItemsController : ControllerBase
             return Unauthorized();
         }
 
-        var query = _dbContext.WorkItems
-            .AsNoTracking()
-            .Where(w => w.OwnerId == currentUserId);
-
-        if (status.HasValue)
-        {
-            query = query.Where(w => w.Status == status.Value);
-        }
-
-        if (priority.HasValue)
-        {
-            query = query.Where(w => w.Priority == priority.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var trimmedSearch = search.Trim();
-            query = query.Where(w =>
-                w.Title.Contains(trimmedSearch) ||
-                (w.Description != null && w.Description.Contains(trimmedSearch)));
-        }
-
-        var items = await query
-            .OrderByDescending(w => w.CreatedAtUtc)
-            .Select(w => WorkItemResponseDto.FromEntity(w))
-            .ToListAsync();
-
+        var items = await _workItemService.GetAllAsync(currentUserId, status, priority, search);
         return Ok(items);
     }
 
@@ -85,16 +57,13 @@ public class WorkItemsController : ControllerBase
             return Unauthorized();
         }
 
-        var item = await _dbContext.WorkItems
-            .AsNoTracking()
-            .SingleOrDefaultAsync(w => w.Id == id && w.OwnerId == currentUserId);
-
+        var item = await _workItemService.GetByIdAsync(id, currentUserId);
         if (item is null)
         {
             return NotFound();
         }
 
-        return Ok(WorkItemResponseDto.FromEntity(item));
+        return Ok(item);
     }
 
     /// <summary>
@@ -111,29 +80,19 @@ public class WorkItemsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            ModelState.AddModelError(nameof(request.Title), "Title cannot be empty or whitespace.");
+            return BadRequest(ModelState);
+        }
+
         if (!TryGetCurrentUserId(out var currentUserId))
         {
             return Unauthorized();
         }
 
-        var item = new WorkItem
-        {
-            Id = Guid.NewGuid(),
-            Title = request.Title.Trim(),
-            Description = request.Description?.Trim(),
-            Status = request.Status,
-            Priority = request.Priority,
-            DueDateUtc = request.DueDateUtc,
-            CreatedAtUtc = DateTime.UtcNow,
-            OwnerId = currentUserId
-        };
-
-        _dbContext.WorkItems.Add(item);
-        await _dbContext.SaveChangesAsync();
-
-        var responseDto = WorkItemResponseDto.FromEntity(item);
-
-        return CreatedAtAction(nameof(GetById), new { id = item.Id }, responseDto);
+        var created = await _workItemService.CreateAsync(currentUserId, request);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
     /// <summary>
@@ -151,29 +110,24 @@ public class WorkItemsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            ModelState.AddModelError(nameof(request.Title), "Title cannot be empty or whitespace.");
+            return BadRequest(ModelState);
+        }
+
         if (!TryGetCurrentUserId(out var currentUserId))
         {
             return Unauthorized();
         }
 
-        var item = await _dbContext.WorkItems
-            .SingleOrDefaultAsync(w => w.Id == id && w.OwnerId == currentUserId);
-
-        if (item is null)
+        var updated = await _workItemService.UpdateAsync(id, currentUserId, request);
+        if (updated is null)
         {
             return NotFound();
         }
 
-        item.Title = request.Title.Trim();
-        item.Description = request.Description?.Trim();
-        item.Status = request.Status;
-        item.Priority = request.Priority;
-        item.DueDateUtc = request.DueDateUtc;
-        item.UpdatedAtUtc = DateTime.UtcNow;
-
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(WorkItemResponseDto.FromEntity(item));
+        return Ok(updated);
     }
 
     /// <summary>
@@ -190,16 +144,11 @@ public class WorkItemsController : ControllerBase
             return Unauthorized();
         }
 
-        var item = await _dbContext.WorkItems
-            .SingleOrDefaultAsync(w => w.Id == id && w.OwnerId == currentUserId);
-
-        if (item is null)
+        var deleted = await _workItemService.DeleteAsync(id, currentUserId);
+        if (!deleted)
         {
             return NotFound();
         }
-
-        _dbContext.WorkItems.Remove(item);
-        await _dbContext.SaveChangesAsync();
 
         return NoContent();
     }
