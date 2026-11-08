@@ -73,6 +73,19 @@ if (args.Contains("--migrate"))
 }
 
 // 6. HTTP Pipeline
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            message = "An unexpected server error occurred."
+        }));
+    });
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

@@ -50,6 +50,7 @@ public class WorkItemService : IWorkItemService
 
         return await query
             .OrderByDescending(w => w.CreatedAtUtc)
+            .ThenBy(w => w.Id)
             .Select(w => WorkItemResponseDto.FromEntity(w))
             .ToListAsync(cancellationToken);
     }
@@ -80,10 +81,10 @@ public class WorkItemService : IWorkItemService
         {
             Id = Guid.NewGuid(),
             Title = request.Title.Trim(),
-            Description = request.Description?.Trim(),
+            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             Status = request.Status,
             Priority = request.Priority,
-            DueDateUtc = request.DueDateUtc,
+            DueDateUtc = NormalizeUtc(request.DueDateUtc),
             CreatedAtUtc = DateTime.UtcNow,
             OwnerId = ownerId
         };
@@ -114,10 +115,10 @@ public class WorkItemService : IWorkItemService
         }
 
         item.Title = request.Title.Trim();
-        item.Description = request.Description?.Trim();
+        item.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
         item.Status = request.Status;
         item.Priority = request.Priority;
-        item.DueDateUtc = request.DueDateUtc;
+        item.DueDateUtc = NormalizeUtc(request.DueDateUtc);
         item.UpdatedAtUtc = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -142,6 +143,22 @@ public class WorkItemService : IWorkItemService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    private static DateTime? NormalizeUtc(DateTime? dateTime)
+    {
+        if (!dateTime.HasValue)
+        {
+            return null;
+        }
+
+        return dateTime.Value.Kind switch
+        {
+            DateTimeKind.Utc => dateTime.Value,
+            DateTimeKind.Local => dateTime.Value.ToUniversalTime(),
+            // When kind is Unspecified, treat as UTC per the DueDateUtc contract
+            _ => DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Utc)
+        };
     }
 }
 

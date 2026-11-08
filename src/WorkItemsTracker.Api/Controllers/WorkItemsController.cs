@@ -31,14 +31,15 @@ public class WorkItemsController : ControllerBase
     public async Task<IActionResult> GetAll(
         [FromQuery] WorkItemStatus? status,
         [FromQuery] WorkItemPriority? priority,
-        [FromQuery] string? search)
+        [FromQuery] string? search,
+        CancellationToken cancellationToken = default)
     {
         if (!TryGetCurrentUserId(out var currentUserId))
         {
             return Unauthorized();
         }
 
-        var items = await _workItemService.GetAllAsync(currentUserId, status, priority, search);
+        var items = await _workItemService.GetAllAsync(currentUserId, status, priority, search, cancellationToken);
         return Ok(items);
     }
 
@@ -50,14 +51,14 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(typeof(WorkItemResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetById(Guid id)
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
         if (!TryGetCurrentUserId(out var currentUserId))
         {
             return Unauthorized();
         }
 
-        var item = await _workItemService.GetByIdAsync(id, currentUserId);
+        var item = await _workItemService.GetByIdAsync(id, currentUserId, cancellationToken);
         if (item is null)
         {
             return NotFound();
@@ -73,7 +74,7 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(typeof(WorkItemResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Create([FromBody] CreateWorkItemRequestDto request)
+    public async Task<IActionResult> Create([FromBody] CreateWorkItemRequestDto request, CancellationToken cancellationToken = default)
     {
         if (!ModelState.IsValid)
         {
@@ -91,7 +92,7 @@ public class WorkItemsController : ControllerBase
             return Unauthorized();
         }
 
-        var created = await _workItemService.CreateAsync(currentUserId, request);
+        var created = await _workItemService.CreateAsync(currentUserId, request, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -103,7 +104,7 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateWorkItemRequestDto request)
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateWorkItemRequestDto request, CancellationToken cancellationToken = default)
     {
         if (!ModelState.IsValid)
         {
@@ -121,7 +122,7 @@ public class WorkItemsController : ControllerBase
             return Unauthorized();
         }
 
-        var updated = await _workItemService.UpdateAsync(id, currentUserId, request);
+        var updated = await _workItemService.UpdateAsync(id, currentUserId, request, cancellationToken);
         if (updated is null)
         {
             return NotFound();
@@ -137,14 +138,14 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         if (!TryGetCurrentUserId(out var currentUserId))
         {
             return Unauthorized();
         }
 
-        var deleted = await _workItemService.DeleteAsync(id, currentUserId);
+        var deleted = await _workItemService.DeleteAsync(id, currentUserId, cancellationToken);
         if (!deleted)
         {
             return NotFound();

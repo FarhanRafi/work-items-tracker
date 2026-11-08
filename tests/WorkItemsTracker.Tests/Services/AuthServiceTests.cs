@@ -151,5 +151,84 @@ public class AuthServiceTests
         profile.Email.Should().Be("profile@example.com");
         profile.FullName.Should().Be("Profile User");
     }
+
+    [Fact]
+    public async Task LoginAsync_ValidCredentials_ReturnsSuccessAndAuthToken()
+    {
+        // Arrange
+        using var dbContext = CreateInMemoryDbContext();
+        var user = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            Email = "valid@example.com",
+            FullName = "Valid User",
+            PasswordHash = "real_hash",
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        var hasherMock = new Mock<IPasswordHasherService>();
+        hasherMock.Setup(h => h.VerifyPassword(It.Is<AppUser>(u => u.Id == user.Id), "Password123!", "real_hash"))
+                  .Returns(true);
+
+        var fakeExpiry = DateTime.UtcNow.AddMinutes(60);
+        var jwtMock = new Mock<IJwtTokenService>();
+        jwtMock.Setup(j => j.GenerateToken(It.Is<AppUser>(u => u.Id == user.Id)))
+               .Returns(("valid.jwt.token", fakeExpiry));
+
+        var loggerMock = new Mock<ILogger<AuthService>>();
+        var authService = new AuthService(dbContext, hasherMock.Object, jwtMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await authService.LoginAsync(new LoginRequestDto("VALID@EXAMPLE.COM", "Password123!"));
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Response.Should().NotBeNull();
+        result.Response!.Token.Should().Be("valid.jwt.token");
+        result.Response.UserId.Should().Be(user.Id);
+        result.Response.Email.Should().Be("valid@example.com");
+        result.Response.FullName.Should().Be("Valid User");
+        result.Response.ExpiresAtUtc.Should().Be(fakeExpiry);
+    }
+
+    [Fact]
+    public async Task LoginAsync_NonExistentEmail_ReturnsFailureResult()
+    {
+        // Arrange
+        using var dbContext = CreateInMemoryDbContext();
+        var hasherMock = new Mock<IPasswordHasherService>();
+        var jwtMock = new Mock<IJwtTokenService>();
+        var loggerMock = new Mock<ILogger<AuthService>>();
+        var authService = new AuthService(dbContext, hasherMock.Object, jwtMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await authService.LoginAsync(new LoginRequestDto("nonexistent@example.com", "Password123!"));
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Invalid email or password.");
+        hasherMock.Verify(h => h.VerifyPassword(It.IsAny<AppUser>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        jwtMock.Verify(j => j.GenerateToken(It.IsAny<AppUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetUserProfileAsync_UserNotFound_ReturnsNull()
+    {
+        // Arrange
+        using var dbContext = CreateInMemoryDbContext();
+        var authService = new AuthService(
+            dbContext,
+            Mock.Of<IPasswordHasherService>(),
+            Mock.Of<IJwtTokenService>(),
+            Mock.Of<ILogger<AuthService>>());
+
+        // Act
+        var profile = await authService.GetUserProfileAsync(Guid.NewGuid());
+
+        // Assert
+        profile.Should().BeNull();
+    }
 }
 

@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WorkItemsTracker.Core.DTOs;
@@ -54,7 +55,7 @@ public class AuthService : IAuthService
             _dbContext.Users.Add(user);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             _logger.LogWarning(ex, "Database unique constraint violation on registration for email {Email}", normalizedEmail);
             return new RegisterResult(false, ErrorMessage: "An account with this email address already exists.", IsConflict: true);
@@ -78,6 +79,7 @@ public class AuthService : IAuthService
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
 
         var user = await _dbContext.Users
+            .AsNoTracking()
             .SingleOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
         if (user is null || !_passwordHasher.VerifyPassword(user, request.Password, user.PasswordHash))
@@ -115,6 +117,19 @@ public class AuthService : IAuthService
             user.FullName,
             user.CreatedAtUtc
         );
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        for (Exception? current = ex.InnerException; current != null; current = current.InnerException)
+        {
+            if (current is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

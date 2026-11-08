@@ -202,11 +202,12 @@ public class WorkItemsIntegrationTests : IAsyncLifetime
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
+    [InlineData("\t\n")]
     public async Task Create_WhitespaceOrEmptyTitle_Returns400BadRequest(string invalidTitle)
     {
         // Arrange
-        var (userClient, _) = await CreateAuthenticatedUserAsync("validator", "Validator");
-        var createDto = new CreateWorkItemRequestDto(Title: invalidTitle, Description: "Some description");
+        var (userClient, _) = await CreateAuthenticatedUserAsync("title_tester", "Title Tester");
+        var createDto = new CreateWorkItemRequestDto(Title: invalidTitle, Description: "Desc");
 
         // Act
         var response = await userClient.PostAsJsonAsync("/api/workitems", createDto);
@@ -243,5 +244,50 @@ public class WorkItemsIntegrationTests : IAsyncLifetime
         // Server must enforce authenticated user's ID, completely ignoring client-supplied OwnerId
         created!.OwnerId.Should().Be(auth.UserId);
         created.OwnerId.Should().NotBe(spoofedOwnerId);
+    }
+
+    [Fact]
+    public async Task Create_InvalidEnumValues_Returns400BadRequest()
+    {
+        // Arrange
+        var (userClient, _) = await CreateAuthenticatedUserAsync("enum_tester", "Enum Tester");
+        var invalidPayload = new
+        {
+            title = "Valid Title",
+            description = "Valid Description",
+            status = 999, // Undefined enum value
+            priority = 999 // Undefined enum value
+        };
+
+        // Act
+        var response = await userClient.PostAsJsonAsync("/api/workitems", invalidPayload);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Create_PreservesUtcForDueDates()
+    {
+        // Arrange
+        var (userClient, _) = await CreateAuthenticatedUserAsync("utc_tester", "UTC Tester");
+        var testDueDate = DateTime.UtcNow.AddDays(5);
+        var createDto = new CreateWorkItemRequestDto(
+            Title: "UTC Verification",
+            Description: "Testing UTC normalization",
+            Status: WorkItemStatus.Todo,
+            Priority: WorkItemPriority.Low,
+            DueDateUtc: testDueDate
+        );
+
+        // Act
+        var response = await userClient.PostAsJsonAsync("/api/workitems", createDto);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await response.Content.ReadFromJsonAsync<WorkItemResponseDto>();
+        created.Should().NotBeNull();
+        created!.DueDateUtc.Should().NotBeNull();
+        created.DueDateUtc!.Value.Should().BeCloseTo(testDueDate, TimeSpan.FromSeconds(1));
     }
 }

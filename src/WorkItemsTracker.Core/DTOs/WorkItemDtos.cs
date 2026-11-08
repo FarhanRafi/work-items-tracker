@@ -7,16 +7,16 @@ namespace WorkItemsTracker.Core.DTOs;
 public record CreateWorkItemRequestDto(
     [Required, MaxLength(200)] string Title,
     [MaxLength(4000)] string? Description,
-    WorkItemStatus Status = WorkItemStatus.Todo,
-    WorkItemPriority Priority = WorkItemPriority.Medium,
+    [EnumDataType(typeof(WorkItemStatus))] WorkItemStatus Status = WorkItemStatus.Todo,
+    [EnumDataType(typeof(WorkItemPriority))] WorkItemPriority Priority = WorkItemPriority.Medium,
     DateTime? DueDateUtc = null
 );
 
 public record UpdateWorkItemRequestDto(
     [Required, MaxLength(200)] string Title,
     [MaxLength(4000)] string? Description,
-    WorkItemStatus Status,
-    WorkItemPriority Priority,
+    [EnumDataType(typeof(WorkItemStatus))] WorkItemStatus Status,
+    [EnumDataType(typeof(WorkItemPriority))] WorkItemPriority Priority,
     DateTime? DueDateUtc
 );
 

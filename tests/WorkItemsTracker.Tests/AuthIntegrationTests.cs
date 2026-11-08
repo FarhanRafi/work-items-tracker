@@ -192,32 +192,48 @@ public class AuthIntegrationTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [Fact]
-    public async Task Register_WhenDuplicateEmailAttempted_Returns409WithoutLeakingDatabaseDetails()
+    [Theory]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public async Task Register_WhitespaceFullName_Returns400BadRequest(string whitespaceName)
     {
         // Arrange
-        var email = $"conflict_{Guid.NewGuid()}@example.com";
-        var firstUser = new RegisterRequestDto(email, "Password123!", "First User");
-        var firstResponse = await _client.PostAsJsonAsync("/api/auth/register", firstUser);
-        firstResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-
-        var duplicateUser = new RegisterRequestDto(email, "Password123!", "Second User");
+        var request = new RegisterRequestDto(
+            Email: $"whitespace_{Guid.NewGuid()}@example.com",
+            Password: "Password123!",
+            FullName: whitespaceName
+        );
 
         // Act
-        var conflictResponse = await _client.PostAsJsonAsync("/api/auth/register", duplicateUser);
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
 
         // Assert
-        conflictResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        var rawContent = await conflictResponse.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 
-        // Must return safe client message
-        rawContent.Should().Contain("An account with this email address already exists.");
+    [Fact]
+    public async Task Register_ConcurrentDuplicateRegistrations_HandlesConflictGracefullyWithoutLeakingDetails()
+    {
+        // Arrange
+        var email = $"race_{Guid.NewGuid()}@example.com";
+        var request1 = new RegisterRequestDto(email, "Password123!", "User One");
+        var request2 = new RegisterRequestDto(email, "Password123!", "User Two");
 
-        // Must never leak database or server internals
-        rawContent.Should().NotContain("SqlException");
-        rawContent.Should().NotContain("IX_Users_Email");
-        rawContent.Should().NotContain("dbo.Users");
-        rawContent.Should().NotContain("StackTrace");
-        rawContent.Should().NotContain("DbUpdateException");
+        // Act - send two requests concurrently
+        var task1 = _client.PostAsJsonAsync("/api/auth/register", request1);
+        var task2 = _client.PostAsJsonAsync("/api/auth/register", request2);
+        var responses = await Task.WhenAll(task1, task2);
+
+        // Assert - exactly one should succeed (201) and one should conflict (409)
+        var statusCodes = responses.Select(r => r.StatusCode).ToList();
+        statusCodes.Should().Contain(HttpStatusCode.Created);
+        statusCodes.Should().Contain(HttpStatusCode.Conflict);
+
+        var conflictResponse = responses.First(r => r.StatusCode == HttpStatusCode.Conflict);
+        var content = await conflictResponse.Content.ReadAsStringAsync();
+        content.Should().Contain("already exists");
+        content.Should().NotContain("SqlException");
+        content.Should().NotContain("Cannot insert duplicate key");
+        content.Should().NotContain("Server=");
     }
 }
